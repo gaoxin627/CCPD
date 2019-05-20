@@ -9,6 +9,7 @@ from os import path, mkdir
 from load_data import *
 from time import time
 from roi_pooling import roi_pooling_ims
+from PIL import Image,ImageDraw,ImageFont
 
 ap = argparse.ArgumentParser()
 ap.add_argument("-i", "--input", required=True,
@@ -18,7 +19,7 @@ ap.add_argument("-m", "--model", required=True,
 args = vars(ap.parse_args())
 
 use_gpu = torch.cuda.is_available()
-print (use_gpu)
+print ('use gpu:', use_gpu)
 
 numClasses = 4
 numPoints = 4
@@ -212,16 +213,27 @@ class fh02(nn.Module):
         x9 = x9.view(x9.size(0), -1)
         boxLoc = self.wR2.module.classifier(x9)
 
-        h1, w1 = _x1.data.size()[2], _x1.data.size()[3]
-        p1 = Variable(torch.FloatTensor([[w1,0,0,0],[0,h1,0,0],[0,0,w1,0],[0,0,0,h1]]).cuda(), requires_grad=False)
-        h2, w2 = _x3.data.size()[2], _x3.data.size()[3]
-        p2 = Variable(torch.FloatTensor([[w2,0,0,0],[0,h2,0,0],[0,0,w2,0],[0,0,0,h2]]).cuda(), requires_grad=False)
-        h3, w3 = _x5.data.size()[2], _x5.data.size()[3]
-        p3 = Variable(torch.FloatTensor([[w3,0,0,0],[0,h3,0,0],[0,0,w3,0],[0,0,0,h3]]).cuda(), requires_grad=False)
+        if use_gpu:
+            h1, w1 = _x1.data.size()[2], _x1.data.size()[3]
+            p1 = Variable(torch.FloatTensor([[w1,0,0,0],[0,h1,0,0],[0,0,w1,0],[0,0,0,h1]]).cuda(), requires_grad=False)
+            h2, w2 = _x3.data.size()[2], _x3.data.size()[3]
+            p2 = Variable(torch.FloatTensor([[w2,0,0,0],[0,h2,0,0],[0,0,w2,0],[0,0,0,h2]]).cuda(), requires_grad=False)
+            h3, w3 = _x5.data.size()[2], _x5.data.size()[3]
+            p3 = Variable(torch.FloatTensor([[w3,0,0,0],[0,h3,0,0],[0,0,w3,0],[0,0,0,h3]]).cuda(), requires_grad=False)
+        else:
+            h1, w1 = _x1.data.size()[2], _x1.data.size()[3]
+            p1 = Variable(torch.FloatTensor([[w1,0,0,0],[0,h1,0,0],[0,0,w1,0],[0,0,0,h1]]), requires_grad=False)
+            h2, w2 = _x3.data.size()[2], _x3.data.size()[3]
+            p2 = Variable(torch.FloatTensor([[w2,0,0,0],[0,h2,0,0],[0,0,w2,0],[0,0,0,h2]]), requires_grad=False)
+            h3, w3 = _x5.data.size()[2], _x5.data.size()[3]
+            p3 = Variable(torch.FloatTensor([[w3,0,0,0],[0,h3,0,0],[0,0,w3,0],[0,0,0,h3]]), requires_grad=False)
 
         # x, y, w, h --> x1, y1, x2, y2
         assert boxLoc.data.size()[1] == 4
-        postfix = Variable(torch.FloatTensor([[1,0,1,0],[0,1,0,1],[-0.5,0,0.5,0],[0,-0.5,0,0.5]]).cuda(), requires_grad=False)
+        if use_gpu:
+            postfix = Variable(torch.FloatTensor([[1,0,1,0],[0,1,0,1],[-0.5,0,0.5,0],[0,-0.5,0,0.5]]).cuda(), requires_grad=False)
+        else:
+            postfix = Variable(torch.FloatTensor([[1,0,1,0],[0,1,0,1],[-0.5,0,0.5,0],[0,-0.5,0,0.5]]), requires_grad=False)
         boxNew = boxLoc.mm(postfix).clamp(min=0, max=1)
 
         # input = Variable(torch.rand(2, 1, 10, 10), requires_grad=True)
@@ -251,10 +263,25 @@ def isEqual(labelGT, labelP):
     return sum(compare)
 
 
+def putText(img, x, y, str):
+    # str = str.decode('utf8')
+    img = cv2.copyMakeBorder(img, 50, 0, 0, 0, cv2.BORDER_CONSTANT, value=[255, 255, 255])
+    cv2img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    pilimg = Image.fromarray(cv2img)
+    draw = ImageDraw.Draw(pilimg)
+    font = ImageFont.truetype('simhei.ttf', 40, encoding="utf-8")
+    draw.text((x, y), str, (255, 0, 0), font=font)
+    cv2charimg = cv2.cvtColor(np.array(pilimg), cv2.COLOR_RGB2BGR)
+    return cv2charimg
+
+
 model_conv = fh02(numPoints, numClasses)
 model_conv = torch.nn.DataParallel(model_conv, device_ids=range(torch.cuda.device_count()))
-model_conv.load_state_dict(torch.load(resume_file))
-model_conv = model_conv.cuda()
+if use_gpu:
+    model_conv.load_state_dict(torch.load(resume_file))
+    model_conv = model_conv.cuda()
+else:
+    model_conv.load_state_dict(torch.load(resume_file, map_location='cpu'))
 model_conv.eval()
 
 
@@ -283,6 +310,13 @@ for i, (XI, ims) in enumerate(trainloader):
     cv2.rectangle(img, (int(left_up[0]), int(left_up[1])), (int(right_down[0]), int(right_down[1])), (0, 0, 255), 2)
     #   The first character is Chinese character, can not be printed normally, thus is omitted.
     lpn = alphabets[labelPred[1]] + ads[labelPred[2]] + ads[labelPred[3]] + ads[labelPred[4]] + ads[labelPred[5]] + ads[labelPred[6]]
-    cv2.putText(img, lpn, (int(left_up[0]), int(left_up[1])-20), cv2.FONT_ITALIC, 2, (0, 0, 255))
-    cv2.imwrite(ims[0], img)
+    lpn = provinces[labelPred[0]] + lpn
+    # cv2.putText(img, lpn, (int(left_up[0]), int(left_up[1])-20), cv2.FONT_ITALIC, 2, (0, 0, 255))
+    img_text = putText(img, int(left_up[0]), int(left_up[1]), lpn)
+
+    # cv2.imwrite(ims[0]+'_res', img)
+    cv2.imshow('res', img_text)
+    key = cv2.waitKey(0)
+    if key == 27:
+        break
 
