@@ -210,7 +210,7 @@ def train_model(model, criterion, optimizer, num_epochs=25):
             if len(y_pred) == batchSize:
                 loss += 0.8 * nn.L1Loss().cuda()(y_pred[:][:2], y[:][:2])
                 loss += 0.2 * nn.L1Loss().cuda()(y_pred[:][2:], y[:][2:])
-                lossAver.append(loss.data[0])
+                lossAver.append(loss.data)
 
                 # Zero gradients, perform a backward pass, and update the weights.
                 optimizer.zero_grad()
