@@ -34,7 +34,7 @@ ap.add_argument("-w", "--writeFile", default='fh02.out',
                 help="file for output")
 args = vars(ap.parse_args())
 
-wR2Path = './wR2/wR2.pth2'
+wR2Path = './wR2/wR2.pth'
 use_gpu = torch.cuda.is_available()
 print (use_gpu)
 
@@ -227,7 +227,10 @@ class fh02(nn.Module):
         self.wR2 = wR2(numPoints)
         self.wR2 = torch.nn.DataParallel(self.wR2, device_ids=range(torch.cuda.device_count()))
         if not path is None:
-            self.wR2.load_state_dict(torch.load(path))
+            if use_gpu:
+                self.wR2.load_state_dict(torch.load(path))
+            else:
+                self.wR2.load_state_dict(torch.load(path, map_location='cpu'))
             # self.wR2 = self.wR2.cuda()
         # for param in self.wR2.parameters():
         #     param.requires_grad = False
